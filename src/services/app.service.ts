@@ -9,13 +9,13 @@ interface mime {
   mimeType: string,
   size: number,
   path: string,
-  downloadCount: number,
   createdAt: number,
   expiresAt: number
 }
 
 export const saveAndShareFile = async (file: File) => {
-  const storedFilename = randomUUID() + file.name
+  const TTL = 60 * 60 * 1000
+  const storedFilename = randomUUID() + path.extname(file.name)
   const uploadPath = path.join('storage', storedFilename)
   await fs.writeFile(uploadPath, Buffer.from(await file.arrayBuffer()))
 
@@ -25,14 +25,13 @@ export const saveAndShareFile = async (file: File) => {
     mimeType: file.type,
     size: file.size,
     path: uploadPath,
-    downloadCount: 0,
     createdAt: Date.now(),
-    expiresAt: Date.now() + 60 * 60
+    expiresAt: Date.now() + TTL
   }
 
   const uuid = randomUUID()
 
-  await redis.set(`file:${uuid}`, JSON.stringify(fileDetails), { expiration: { type: "EX", value: 60 * 60 } })
+  await redis.set(`file:${uuid}`, JSON.stringify(fileDetails), { expiration: { type: "EX", value: TTL } })
 
   return {
     cacheKey: `file:${uuid}`
@@ -45,11 +44,13 @@ export const downloaadFile = async (fileKeys: string) => {
   const value = await redis.get(fileKeys)
 
   if (!value) throw new Error('Invalid cache key')
-  console.log("value", value)
 
   const parsedValue: mime = JSON.parse(value)
 
   const filePath = path.join("storage", parsedValue.storedFilename)
-  const file = await fs.readFile(filePath)
-  return file
+  try {
+    return await fs.readFile(filePath)
+  } catch {
+    throw new Error("Stored file no longer exists")
+  }
 }
